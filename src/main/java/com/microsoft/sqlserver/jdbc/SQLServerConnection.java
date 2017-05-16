@@ -109,6 +109,25 @@ public class SQLServerConnection implements ISQLServerConnection {
     private ConcurrentHashMap<CityHash128Key, PreparedStatementHandle> preparedStatementHandleMap = new ConcurrentHashMap<>();
     private AtomicBoolean isUnprepareInProgress = new AtomicBoolean();
 
+    private final static char[] parameterNameLookup;
+
+    static {
+        parameterNameLookup = new char[390];
+        for (int i = 0, offset = 0; i < 100; i++) {
+            parameterNameLookup[offset + 0] = '@';
+            parameterNameLookup[offset + 1] = 'P';
+            if (i < 10) {
+                parameterNameLookup[offset + 2] = (char) ('0' + i);
+                offset += 3;
+            }
+            else {
+                parameterNameLookup[offset + 2] = (char) ('0' + (i / 10));
+                parameterNameLookup[offset + 3] = (char) ('0' + (i % 10));
+                offset += 4;
+            }
+        }
+    }
+
     private boolean fedAuthRequiredByUser = false;
     private boolean fedAuthRequiredPreLoginResponse = false;
     private boolean federatedAuthenticationAcknowledged = false;
@@ -197,19 +216,50 @@ public class SQLServerConnection implements ISQLServerConnection {
      * Used to keep track of an individual handle ready for un-prepare.
      */
     final class PreparedStatementMetadata {
-        private final SQLServerParameterMetaData parameterMetadata;
         private final CityHash128Key hashKey;
+        private volatile SQLServerParameterMetaData parameterMetadata;
+        private volatile int preparedTypeDefinitionHash;
+        private volatile String preparedTypeDefinitions;
+        private volatile String preparedSQL;
 
-        PreparedStatementMetadata(CityHash128Key hashKey, SQLServerParameterMetaData parameterMetadata) {
+        PreparedStatementMetadata(CityHash128Key hashKey) {
             this.hashKey = hashKey;
-            this.parameterMetadata = parameterMetadata;
 
             // keep the statement handle alive for the life of the prepared statement metadata
             borrowStatementHandle(hashKey);
         }
 
+        boolean hasParameterMetadata() {
+            return null != parameterMetadata;
+        }
+
         SQLServerParameterMetaData getParameterMetadata() {
             return parameterMetadata;
+        }
+
+        void setParameterMetadata(SQLServerParameterMetaData parameterMetadata) {
+            this.parameterMetadata = parameterMetadata;
+        }
+
+        String getPreparedTypeDefinitions(Parameter[] params) {
+            return (Arrays.hashCode(params) == preparedTypeDefinitionHash) ? preparedTypeDefinitions : null;
+        }
+
+        void setPreparedTypeDefinitions(Parameter[] params, String preparedTypeDefinitions) {
+            if (null == this.preparedTypeDefinitions) {
+                this.preparedTypeDefinitionHash = Arrays.hashCode(params);
+                this.preparedTypeDefinitions = preparedTypeDefinitions;
+            }
+        }
+
+        String getPreparedSql() {
+            return preparedSQL;
+        }
+
+        void setPreparedSql(String preparedSQL) {
+            if (null == this.preparedSQL) {
+                this.preparedSQL = preparedSQL;
+            }
         }
 
         void releaseStatementHandle() {
@@ -5148,29 +5198,23 @@ public class SQLServerConnection implements ISQLServerConnection {
     /* L0 */ static int makeParamName(int nParam,
             char[] name,
             int offset) {
-        name[offset + 0] = '@';
-        name[offset + 1] = 'P';
+
         if (nParam < 10) {
-            name[offset + 2] = (char) ('0' + nParam);
+            int start = nParam * 3;
+            System.arraycopy(parameterNameLookup, start, name, offset, 3);
             return 3;
         }
+        else if (nParam < 100) {
+            int start = 30 + ((nParam - 10) * 4);
+            System.arraycopy(parameterNameLookup, start, name, offset, 4);
+            return 4;
+        }
         else {
-            if (nParam < 100) {
-                int nBase = 2;
-                while (true) { // make a char[] representation of the param number 2.26
-                    if (nParam < nBase * 10) {
-                        name[offset + 2] = (char) ('0' + (nBase - 1));
-                        name[offset + 3] = (char) ('0' + (nParam - ((nBase - 1) * 10)));
-                        return 4;
-                    }
-                    nBase++;
-                }
-            }
-            else {
-                String sParam = "" + nParam;
-                sParam.getChars(0, sParam.length(), name, offset + 2);
-                return 2 + sParam.length();
-            }
+            name[offset + 0] = '@';
+            name[offset + 1] = 'P';
+            String sParam = "" + nParam;
+            sParam.getChars(0, sParam.length(), name, offset + 2);
+            return 2 + sParam.length();
         }
     }
 
@@ -5695,7 +5739,7 @@ public class SQLServerConnection implements ISQLServerConnection {
      * @return Returns the current setting per the description.
      */
     public boolean isStatementPoolingEnabled() {
-        return null != preparedStatementMetadataCache;
+        return null != preparedStatementMetadataCache && 0 < statementPoolingCacheSize;
     }
 
     /**
@@ -5721,13 +5765,18 @@ public class SQLServerConnection implements ISQLServerConnection {
         return preparedStatementMetadataCache.get(key);
     }
 
-    final void registerPreparedStatementMetadata(CityHash128Key key, SQLServerParameterMetaData parameterMetadata) {
+    final PreparedStatementMetadata registerPreparedStatementMetadata(CityHash128Key key) {
         if (!isStatementPoolingEnabled())
-            return;
+            return null;
 
-        PreparedStatementMetadata existingMetadata = preparedStatementMetadataCache.putIfAbsent(key, new PreparedStatementMetadata(key, parameterMetadata));
-        if (null != existingMetadata)
+        final PreparedStatementMetadata statementMetadata = new PreparedStatementMetadata(key);
+        PreparedStatementMetadata existingMetadata = preparedStatementMetadataCache.putIfAbsent(key, statementMetadata);
+        if (null != existingMetadata) {
             existingMetadata.releaseStatementHandle();
+            return existingMetadata;
+        }
+
+        return statementMetadata;
     }
 }
 

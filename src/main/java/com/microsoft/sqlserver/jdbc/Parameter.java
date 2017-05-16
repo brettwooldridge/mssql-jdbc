@@ -8,6 +8,8 @@
 
 package com.microsoft.sqlserver.jdbc;
 
+import static java.util.Objects.deepEquals;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -64,6 +66,30 @@ final class Parameter {
 
     Parameter(boolean honorAE) {
         shouldHonorAEForParameter = honorAE;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (!(obj instanceof Parameter)) {
+            return false;
+        }
+        Parameter other = (Parameter) obj;
+        
+        return deepEquals(this.typeInfo, other.typeInfo)
+            && deepEquals(this.jdbcTypeSetByUser, other.jdbcTypeSetByUser)
+            && deepEquals(this.cryptoMeta, other.cryptoMeta);
+    }
+
+    @Override
+    public int hashCode() {
+        int hc = valueLength;
+        hc = 31 * hc + (typeInfo != null ? typeInfo.hashCode() : 0);
+        hc = 31 * hc + (cryptoMeta != null && cryptoMeta.baseTypeInfo != null ? cryptoMeta.baseTypeInfo.hashCode() : 0);
+        hc = 31 * hc + (jdbcTypeSetByUser != null ? jdbcTypeSetByUser.asJavaSqlType() : 0);
+        return hc;
     }
 
     // Flag set to true if this is a registered OUTPUT parameter.

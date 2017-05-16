@@ -604,7 +604,9 @@ public class SQLServerResultSet implements ISQLServerResultSet {
      * @return the column index
      */
     public int findColumn(String columnName) throws SQLServerException {
-        loggerExternal.entering(getClassNameLogging(), "findColumn", columnName);
+        if (loggerExternal.isLoggable(Level.FINER))
+            loggerExternal.entering(getClassNameLogging(), "findColumn", columnName);
+
         checkClosed();
 
         // In order to be as accurate as possible when locating column name
@@ -630,7 +632,8 @@ public class SQLServerResultSet implements ISQLServerResultSet {
         int i;
         for (i = 0; i < columns.length; i++) {
             if (columns[i].getColumnName().equals(columnName)) {
-                loggerExternal.exiting(getClassNameLogging(), "findColumn", i + 1);
+                if (loggerExternal.isLoggable(Level.FINER))
+                    loggerExternal.exiting(getClassNameLogging(), "findColumn", i + 1);
                 return i + 1;
             }
         }
@@ -641,7 +644,8 @@ public class SQLServerResultSet implements ISQLServerResultSet {
         // Use VM supplied String.equalsIgnoreCase to do the "case-insensitive search".
         for (i = 0; i < columns.length; i++) {
             if (columns[i].getColumnName().equalsIgnoreCase(columnName)) {
-                loggerExternal.exiting(getClassNameLogging(), "findColumn", i + 1);
+                if (loggerExternal.isLoggable(Level.FINER))
+                    loggerExternal.exiting(getClassNameLogging(), "findColumn", i + 1);
                 return i + 1;
             }
         }

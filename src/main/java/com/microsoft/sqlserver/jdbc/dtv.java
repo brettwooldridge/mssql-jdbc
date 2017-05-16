@@ -1590,7 +1590,7 @@ final class DTV {
         }
         else // null != value
         {
-            if (aeLogger.isLoggable(java.util.logging.Level.FINE) && (null != cryptoMeta)) {
+            if ((null != cryptoMeta) && aeLogger.isLoggable(java.util.logging.Level.FINE)) {
                 aeLogger.fine("Encrypting java data type: " + javaType);
             }
 
@@ -2397,6 +2397,21 @@ final class TypeInfo {
     // Collation (will be null for non-textual types).
     private SQLCollation collation;
     private Charset charset;
+
+    @Override
+    public int hashCode() {
+        int hc = maxLength;
+        hc = 31 * hc + precision;
+        hc = 31 * hc + displaySize;
+        hc = 31 * hc + scale;
+        hc = 31 * hc + flags;
+        hc = 31 * hc + userType;
+        hc = 31 * hc + (ssLenType != null ? ssLenType.ordinal() : 0);
+        hc = 31 * hc + (ssType != null ? ssType.ordinal() : 0);
+        hc = 31 * hc + (udtTypeName != null ? udtTypeName.hashCode() : 0);
+
+        return hc;
+    }
 
     SSType getSSType() {
         return ssType;

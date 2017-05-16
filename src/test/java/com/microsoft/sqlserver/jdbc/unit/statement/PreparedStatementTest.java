@@ -70,6 +70,8 @@ public class PreparedStatementTest extends AbstractTest {
         try (SQLServerConnection con = (SQLServerConnection)DriverManager.getConnection(connectionString)) {
             conOuter = con;
 
+            con.setStatementPoolingCacheSize(0);
+
             // Clean-up proc cache
             this.executeSQL(con, "DBCC FREEPROCCACHE;");
 
@@ -88,7 +90,7 @@ public class PreparedStatementTest extends AbstractTest {
             // Verify no prepares for 1 time only uses.
             for (int i = 0; i < iterations; ++i) {
                 try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query)) {
-                    pstmt.execute();
+                    pstmt.executeQuery();
                 }
                 assertSame(0, con.getDiscardableServerPreparedStatementCount());
             }
@@ -107,12 +109,12 @@ public class PreparedStatementTest extends AbstractTest {
 
                 query = String.format("/*unpreparetest_%s, sp_executesql->sp_prepexec->sp_execute- batched sp_unprepare*/SELECT * FROM sys.tables;", UUID.randomUUID().toString());
                 try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query)) {
-                    pstmt.execute(); // sp_executesql
+                    pstmt.executeQuery(); // sp_executesql
 
-                    pstmt.execute(); // sp_prepexec
+                    pstmt.executeQuery(); // sp_prepexec
                     ++prevDiscardActionCount;
 
-                    pstmt.execute(); // sp_execute
+                    pstmt.executeQuery(); // sp_execute
 
                     if (i > 0)
                         assertNotSame(handle, pstmt.getPreparedStatementHandle());
@@ -159,7 +161,7 @@ public class PreparedStatementTest extends AbstractTest {
         try (SQLServerConnection con = (SQLServerConnection)DriverManager.getConnection(connectionString)) {
             // Execute query first, creates metadata cache entry
             try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query)) {
-                pstmt.execute(); // sp_executesql
+                pstmt.executeQuery(); // sp_executesql
 
                 metadata = pstmt.getParameterMetaData();  // causes population of parameter metadata cache
                 Assert.assertNotNull(metadata);
@@ -167,14 +169,14 @@ public class PreparedStatementTest extends AbstractTest {
 
             // Execute query again, should get the same ParameterMetaData instance as above
             try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query)) {
-                pstmt.execute(); // sp_prepexec
+                pstmt.executeQuery(); // sp_prepexec
 
                 assertSame(metadata, pstmt.getParameterMetaData());
             }
 
             // Execute new statement with different SQL text and verify it does NOT get same metadata instance
             try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query + ";")) {
-                pstmt.execute(); // sp_executesql
+                pstmt.executeQuery(); // sp_executesql
 
                 assertNotSame(metadata, pstmt.getParameterMetaData());
             }
@@ -201,7 +203,7 @@ public class PreparedStatementTest extends AbstractTest {
                     public void run() {
                         for (int j = 0; j < 500; j++) {
                             try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement) con.prepareStatement(queries[j % 3])) {
-                                pstmt.execute(); // sp_executesql
+                                pstmt.executeQuery(); // sp_executesql
                             }
                             catch (SQLException e) {
                                 exception.set(e);

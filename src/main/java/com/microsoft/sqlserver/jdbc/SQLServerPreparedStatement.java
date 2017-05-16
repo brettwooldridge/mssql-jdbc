@@ -72,7 +72,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
     private CityHash128Key cacheKey;
 
     /** Reference to cache item for statement pooling. Only used to decrement ref count on statement close. */
-    private final PreparedStatementMetadata cachedPreparedStatementMetadata; 
+    private PreparedStatementMetadata cachedPreparedStatementMetadata; 
 
     /**
      * Array with parameter names generated in buildParamTypeDefinitions For mapping encryption information to parameters, as the second result set
@@ -97,6 +97,9 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
     /** The prepared statement handle returned by the server */
     private int prepStmtHandle = 0;
+
+    /** Was this handle borrowed from the cache */
+    private boolean borrowedHandle;
 
     /** The server handle for this prepared statement. If a value < 1 is returned no handle has been created. 
      * 
@@ -180,8 +183,10 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         // Attempt to borrow the statement handle, if statement handle caching is enabled, this will be 0 if not.
         prepStmtHandle = connection.borrowStatementHandle(cacheKey);
-        if (0 < prepStmtHandle)
+        if (0 < prepStmtHandle) {
             isExecutedAtLeastOnce = true;
+            borrowedHandle = true;
+        }
 
         // See if existing prepared statement parameter metadata can be re-used, this will be null if not.
         cachedPreparedStatementMetadata = connection.getPreparedStatementMetadata(cacheKey);
@@ -299,8 +304,16 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      */
     private boolean buildPreparedStrings(Parameter[] params,
             boolean renewDefinition) throws SQLServerException {
-        String newTypeDefinitions = buildParamTypeDefinitions(params, renewDefinition);
-        if (null != preparedTypeDefinitions && newTypeDefinitions.equals(preparedTypeDefinitions))
+
+        String newTypeDefinitions = (null != cachedPreparedStatementMetadata) ? cachedPreparedStatementMetadata.getPreparedTypeDefinitions(params) : null;
+        if (!renewDefinition && null != newTypeDefinitions) {
+            preparedTypeDefinitions = newTypeDefinitions;
+            preparedSQL = cachedPreparedStatementMetadata.getPreparedSql();
+            return false;
+        }
+
+        newTypeDefinitions = buildParamTypeDefinitions(params, renewDefinition);
+        if (newTypeDefinitions.equals(preparedTypeDefinitions))
             return false;
 
         preparedTypeDefinitions = newTypeDefinitions;
@@ -309,6 +322,14 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         preparedSQL = connection.replaceParameterMarkers(userSQL, params, bReturnValueSyntax);
         if (bRequestedGeneratedKeys)
             preparedSQL = preparedSQL + identityQuery;
+
+        if (null == cachedPreparedStatementMetadata)
+            cachedPreparedStatementMetadata = connection.registerPreparedStatementMetadata(cacheKey);
+
+        if (null != cachedPreparedStatementMetadata) {
+            cachedPreparedStatementMetadata.setPreparedTypeDefinitions(params, newTypeDefinitions);
+            cachedPreparedStatementMetadata.setPreparedSql(preparedSQL);
+        }
 
         return true;
     }
@@ -336,8 +357,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                 sb.append(',');
 
             int l = SQLServerConnection.makeParamName(i, cParamName, 0);
-            for (int j = 0; j < l; j++)
-                sb.append(cParamName[j]);
+            sb.append(cParamName, 0, l);
             sb.append(' ');
 
             parameterNames.add(i, (new String(cParamName)).trim());
@@ -479,11 +499,8 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         }
 
         boolean hasExistingTypeDefinitions = preparedTypeDefinitions != null;
-        boolean hasNewTypeDefinitions = true;
-        if (!encryptionMetadataIsRetrieved) {
-            hasNewTypeDefinitions = buildPreparedStrings(inOutParam, false);
-        }
-
+        boolean hasNewTypeDefinitions = false;
+        
         if ((Util.shouldHonorAEForParameters(stmtColumnEncriptionSetting, connection)) && (0 < inOutParam.length) && !isInternalEncryptionQuery) {
 
             // retrieve paramater encryption metadata if they are not retrieved yet
@@ -498,6 +515,9 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
             // fix an issue when inserting unicode into non-encrypted nchar column using setString() and AE is on on Connection
             hasNewTypeDefinitions = buildPreparedStrings(inOutParam, true);
+        }
+        else if (!encryptionMetadataIsRetrieved) {
+            hasNewTypeDefinitions = buildPreparedStrings(inOutParam, false);
         }
 
         // Start the request and detach the response reader so that we can
@@ -533,14 +553,18 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
                 if (!expectPrepStmtHandle)
                     return super.onRetValue(tdsReader);
 
-                // If a prepared statement handle is expected then consume it
-                // and continue processing.
+                // If a prepared statement handle is expected then consume it and continue processing.
                 expectPrepStmtHandle = false;
                 Parameter param = new Parameter(Util.shouldHonorAEForParameters(stmtColumnEncriptionSetting, connection));
                 param.skipRetValStatus(tdsReader);
                 prepStmtHandle = param.getInt(tdsReader);
 
+                // In the case of re-prepare, if we've already borrowed a handle then we need to return it
+                if (borrowedHandle)
+                    connection.returnStatementHandle(cacheKey);
+
                 connection.registerStatementHandle(cacheKey, prepStmtHandle, executedSqlDirectly);
+                cachedPreparedStatementMetadata = connection.registerPreparedStatementMetadata(cacheKey);
 
                 param.skipValue(tdsReader, true);
                 if (getStatementLogger().isLoggable(java.util.logging.Level.FINER))
@@ -2850,7 +2874,8 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      *              Per the description.
      */
     public final ParameterMetaData getParameterMetaData(boolean forceRefresh) throws SQLServerException {
-        if (!forceRefresh && null != cachedPreparedStatementMetadata) {
+
+        if (!forceRefresh && null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasParameterMetadata()) {
             return cachedPreparedStatementMetadata.getParameterMetadata();
         }
         else {
@@ -2858,7 +2883,11 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
             checkClosed();
             SQLServerParameterMetaData pmd = new SQLServerParameterMetaData(this, userSQL);
 
-            connection.registerPreparedStatementMetadata(cacheKey, pmd);
+            if (null == cachedPreparedStatementMetadata)
+                cachedPreparedStatementMetadata = connection.registerPreparedStatementMetadata(cacheKey);
+
+            if (null != cachedPreparedStatementMetadata)
+                cachedPreparedStatementMetadata.setParameterMetadata(pmd);
 
             loggerExternal.exiting(getClassNameLogging(), "getParameterMetaData", pmd);
  
