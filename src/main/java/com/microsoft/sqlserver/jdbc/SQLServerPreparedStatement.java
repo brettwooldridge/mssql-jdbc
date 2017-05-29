@@ -178,9 +178,16 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
             isExecutedAtLeastOnce = true;
             borrowedHandle = true;
         }
+        else {
+            getStatementLogger().info("prepStmtHandle cache miss");
+        }
 
         // See if existing prepared statement parameter metadata can be re-used, this will be null if not.
         cachedPreparedStatementMetadata = connection.getPreparedStatementMetadata(cacheKey);
+
+        if (null == cachedPreparedStatementMetadata) {
+            getStatementLogger().info("cachedPreparedStatementMetadata cache miss");
+        }
 
         // Parse or fetch SQL metadata from cache.
         ParsedSQLCacheItem parsedSql = getOrCreateCachedParsedSQL(cacheKey, sql);
@@ -705,6 +712,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         if (getStatementLogger().isLoggable(java.util.logging.Level.FINE))
             getStatementLogger().fine(toString() + ": calling sp_executesql: SQL:" + preparedSQL);
 
+        getStatementLogger().info(toString() + ": calling sp_executesql: SQL:" + preparedSQL);
         expectPrepStmtHandle = false;
         executedSqlDirectly = true;
         expectCursorOutParams = false;
@@ -770,8 +778,10 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         // see Tabular Data Stream Protocol 2.2.6.6 RPC Request
         int optionFlags = 0;
-        optionFlags |= (null == cachedPreparedStatementMetadata || !cachedPreparedStatementMetadata.hasParameterMetadata()) ? 0 : 0b00000010; // fReuseMetaData
-        optionFlags |= (null == cachedPreparedStatementMetadata || !cachedPreparedStatementMetadata.hasResultSetColumns())  ? 0 : 0b00000100; // fNoMetaData
+        if (null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasResultSetColumns()) {
+            optionFlags |= 0b00000010; // fNoMetaData
+            optionFlags |= 0b00000100; // fReuseMetaData            
+        }
         tdsWriter.writeByte((byte) optionFlags); // RPC procedure OptionFlags
         tdsWriter.writeByte((byte) 0);           // RPC procedure StatusFlags
 
