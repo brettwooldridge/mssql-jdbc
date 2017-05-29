@@ -30,6 +30,8 @@ import java.util.Calendar;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
+import com.microsoft.sqlserver.jdbc.SQLServerConnection.PreparedStatementMetadata;
+
 /**
  * Indicates the type of the row received from the server
  */
@@ -186,10 +188,6 @@ public class SQLServerResultSet implements ISQLServerResultSet {
         columns[index - 1].setColumnName(name);
     }
 
-    final Column[] getColumns() {
-        return columns;
-    }
-
     /**
      * Skips columns between the last marked column and the target column, inclusive, optionally discarding their values as they are skipped.
      */
@@ -219,7 +217,7 @@ public class SQLServerResultSet implements ISQLServerResultSet {
      * @param cekTable2 
      * @param resultSetColumns 
      */
-    SQLServerResultSet(SQLServerStatement stmtIn, Column[] resultSetColumns, CekTable cekTable) throws SQLServerException {
+    SQLServerResultSet(SQLServerStatement stmtIn, PreparedStatementMetadata cachedMetadata) throws SQLServerException {
         int resultSetID = nextResultSetID();
         loggingClassName = "com.microsoft.sqlserver.jdbc.SQLServerResultSet" + ":" + resultSetID;
         traceID = "SQLServerResultSet:" + resultSetID;
@@ -238,7 +236,11 @@ public class SQLServerResultSet implements ISQLServerResultSet {
             private StreamTabName tabName = null;
 
             final Column[] buildColumns() throws SQLServerException {
-                return columnMetaData.buildColumns(colInfo, tabName);
+                Column[] builtColumns = columnMetaData.buildColumns(colInfo, tabName);
+                if (null != cachedMetadata) {
+                    cachedMetadata.setResultSetColumns(builtColumns, cekTable);
+                }
+                return builtColumns;
             }
 
             CursorInitializer(String name) {
@@ -366,24 +368,23 @@ public class SQLServerResultSet implements ISQLServerResultSet {
         this.fetchDirection = stmtIn.nFetchDirection;
 
         CursorInitializer initializer = stmtIn.executedSqlDirectly ? (new ClientCursorInitializer()) : (new ServerCursorInitializer(stmtIn));
-
         TDSParser.parse(stmtIn.resultsReader(), initializer);
-        if (null != resultSetColumns) {
-            // TODO clone resultSetColumns
-            this.columns = resultSetColumns;
-            for (int i = 0; i < resultSetColumns.length; i++) {
-                this.columns[i].clear();
+
+        if (null != cachedMetadata && cachedMetadata.hasResultSetColumns()) {
+            this.cekTable = cachedMetadata.getCekTable();
+
+            final Column[] cachedColumns = cachedMetadata.getResultSetColumns();
+            this.columns = new Column[cachedColumns.length];
+            for (int i = 0; i < cachedColumns.length; i++) {
+                this.columns[i] = cachedColumns[i].cloneForReuse();
             }
         }
         else {
             this.columns = initializer.buildColumns();
         }
+
         this.rowCount = initializer.getRowCount();
         this.serverCursorId = initializer.getServerCursorId();
-
-        if (null != cekTable) {
-            this.cekTable = cekTable;
-        }
 
         // If this result set does not use a server cursor, then the result set rows
         // (if any) are already present in the fetch buffer at which the statement's

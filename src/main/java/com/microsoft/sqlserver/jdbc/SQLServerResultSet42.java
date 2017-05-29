@@ -10,6 +10,8 @@ package com.microsoft.sqlserver.jdbc;
 
 import java.sql.SQLType;
 
+import com.microsoft.sqlserver.jdbc.SQLServerConnection.PreparedStatementMetadata;
+
 /**
  * 
  * This class is separated from SQLServerResultSet class in order to resolve compiling error of missing Java 8 Types when running with Java 7.
@@ -27,8 +29,8 @@ public class SQLServerResultSet42 extends SQLServerResultSet implements ISQLServ
      * @throws SQLServerException
      *             when an error occurs
      */
-    public SQLServerResultSet42(SQLServerStatement stmtIn, Column[] resultSetColumns, CekTable cekTable) throws SQLServerException {
-        super(stmtIn, resultSetColumns, cekTable);
+    public SQLServerResultSet42(SQLServerStatement stmtIn, PreparedStatementMetadata cachedMetadata) throws SQLServerException {
+        super(stmtIn, cachedMetadata);
     }
 
     public void updateObject(int index,

@@ -127,6 +127,14 @@ final class Column {
         this.cryptoMetadata = cryptoMeta;
     }
 
+    final Column cloneForReuse() {
+        Column column = new Column(typeInfo, columnName, tableName, cryptoMetadata);
+        column.infoStatus = infoStatus;
+        column.tableNum = tableNum;
+        column.jdbcTypeSetByUser = jdbcTypeSetByUser;
+        return column;
+    }
+
     CryptoMetadata getCryptoMetadata() {
         return cryptoMetadata;
     }

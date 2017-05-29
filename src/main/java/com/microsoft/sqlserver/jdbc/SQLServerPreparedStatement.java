@@ -133,8 +133,6 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      */
     private boolean encryptionMetadataIsRetrieved = false;
 
-    private boolean isCanReuseMetadata;
-
     // Internal function used in tracing
     String getClassNameInternal() {
         return "SQLServerPreparedStatement";
@@ -320,7 +318,6 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         if (!renewDefinition && null != newTypeDefinitions) {
             preparedTypeDefinitions = newTypeDefinitions;
             preparedSQL = cachedPreparedStatementMetadata.getPreparedSql();
-            isCanReuseMetadata = true;
             return false;
         }
 
@@ -330,7 +327,6 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
             return false;
 
         preparedTypeDefinitions = newTypeDefinitions;
-        isCanReuseMetadata = false;
 
         /* Replace the parameter marker '?' with the param numbers @p1, @p2 etc */
         preparedSQL = connection.replaceParameterMarkers(userSQL, params, bReturnValueSyntax);
@@ -339,6 +335,8 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         if (null == cachedPreparedStatementMetadata)
             cachedPreparedStatementMetadata = connection.registerPreparedStatementMetadata(cacheKey);
+        else
+            cachedPreparedStatementMetadata.setResultSetColumns(null, null);
 
         if (null != cachedPreparedStatementMetadata) {
             cachedPreparedStatementMetadata.setPreparedTypeDefinitions(params, newTypeDefinitions);
@@ -543,17 +541,15 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         ensureExecuteResultsReader(command.startResponse(getIsResponseBufferingAdaptive()));
         startResults();
-        if (isCanReuseMetadata && null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasResultSetColumns()) {
-            getNextResult(cachedPreparedStatementMetadata.getResultSetColumns(), cachedPreparedStatementMetadata.getCekTable());
-        }
-        else {
-            getNextResult();
-            getStatementLogger().info("No cached ResultSet metadata for prepared statement");
-            if (null != resultSet && null != cachedPreparedStatementMetadata) {
-                cachedPreparedStatementMetadata.setResultSetColumns(resultSet.getColumns(), resultSet.getCekTable());
-                isCanReuseMetadata = true;
-            }
-        }
+        getNextResult(cachedPreparedStatementMetadata);
+
+//        if (isCanReuseMetadata && null != cachedPreparedStatementMetadata) {
+//            getNextResult(cachedPreparedStatementMetadata);
+//        }
+//        else {
+//            getNextResult();
+//            getStatementLogger().info("No cached ResultSet metadata for prepared statement");
+//        }
 
         if (EXECUTE_QUERY == executeMethod && null == resultSet) {
             SQLServerException.makeFromDriverError(connection, this, SQLServerException.getErrString("R_noResultset"), null, true);
@@ -759,20 +755,13 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         tdsWriter.writeShort((short) 0xFFFF); // procedure name length -> use ProcIDs
         tdsWriter.writeShort(TDS.PROCID_SP_EXECUTE);
-        
-        if (isCanReuseMetadata) {
-            getStatementLogger().info("Executing with fNoMetaData and fReuseMetaData");
-            // see Tabular Data Stream Protocol 2.2.6.6 RPC Request
-            tdsWriter.writeByte((byte) 0b00000110); // fNoMetaData and fReuseMetaData
-            tdsWriter.writeByte((byte) 0);          // RPC procedure option 2
-        }
-        else {
-            getStatementLogger().info("Executing isCanReuseMetadata=false");
-            tdsWriter.writeByte((byte) 0);  // RPC procedure option 1
-            tdsWriter.writeByte((byte) 0);  // RPC procedure option 2
-        }
 
-        isCanReuseMetadata = true;
+        // see Tabular Data Stream Protocol 2.2.6.6 RPC Request
+        int optionFlags = 0;
+        optionFlags |= (null == cachedPreparedStatementMetadata || !cachedPreparedStatementMetadata.hasParameterMetadata()) ? 0 : 0b00000010; // fReuseMetaData
+        optionFlags |= (null == cachedPreparedStatementMetadata || !cachedPreparedStatementMetadata.hasResultSetColumns())  ? 0 : 0b00000100; // fNoMetaData
+        tdsWriter.writeByte((byte) optionFlags); // RPC procedure OptionFlags
+        tdsWriter.writeByte((byte) 0);           // RPC procedure StatusFlags
 
         // <handle> IN
         assert hasPreparedStatementHandle();
