@@ -174,6 +174,13 @@ public class PreparedStatementTest extends AbstractTest {
                 assertSame(metadata, pstmt.getParameterMetaData());
             }
 
+            // Execute query again, should get the same ParameterMetaData instance as above
+            try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query)) {
+                pstmt.executeQuery(); // sp_exec
+
+                assertSame(metadata, pstmt.getParameterMetaData());
+            }
+
             // Execute new statement with different SQL text and verify it does NOT get same metadata instance
             try (SQLServerPreparedStatement pstmt = (SQLServerPreparedStatement)con.prepareStatement(query + ";")) {
                 pstmt.executeQuery(); // sp_executesql

@@ -1306,6 +1306,10 @@ public class SQLServerStatement implements ISQLServerStatement {
      * @return true if another result (ResultSet or update count) was available; false if there were no more results.
      */
     final boolean getNextResult() throws SQLServerException {
+        return getNextResult(null, null);
+    }
+
+    final boolean getNextResult(Column[] resultSetColumns, CekTable cekTable) throws SQLServerException {
         /**
          * TDS response token stream handler used to locate the next result in the TDS response token stream.
          */
@@ -1548,10 +1552,10 @@ public class SQLServerStatement implements ISQLServerStatement {
         // Not an error. Is it a result set?
         else if (nextResult.isResultSet()) {
             if (Util.use42Wrapper()) {
-                resultSet = new SQLServerResultSet42(this);
+                resultSet = new SQLServerResultSet42(this, resultSetColumns, cekTable);
             }
             else {
-                resultSet = new SQLServerResultSet(this);
+                resultSet = new SQLServerResultSet(this, resultSetColumns, cekTable);
             }
 
             return true;

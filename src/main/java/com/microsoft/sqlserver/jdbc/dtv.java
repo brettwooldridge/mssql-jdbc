@@ -2398,19 +2398,24 @@ final class TypeInfo {
     private SQLCollation collation;
     private Charset charset;
 
+    private int hashCode;
+
     @Override
     public int hashCode() {
-        int hc = maxLength;
-        hc = 31 * hc + precision;
-        hc = 31 * hc + displaySize;
-        hc = 31 * hc + scale;
-        hc = 31 * hc + flags;
-        hc = 31 * hc + userType;
-        hc = 31 * hc + (ssLenType != null ? ssLenType.ordinal() : 0);
-        hc = 31 * hc + (ssType != null ? ssType.ordinal() : 0);
-        hc = 31 * hc + (udtTypeName != null ? udtTypeName.hashCode() : 0);
+        if (hashCode != 0)
+            return hashCode;
 
-        return hc;
+        hashCode = maxLength;
+        hashCode = 31 * hashCode + precision;
+        hashCode = 31 * hashCode + displaySize;
+        hashCode = 31 * hashCode + scale;
+        hashCode = 31 * hashCode + flags;
+        hashCode = 31 * hashCode + userType;
+        hashCode = 31 * hashCode + (ssLenType != null ? ssLenType.ordinal() : 0);
+        hashCode = 31 * hashCode + (ssType != null ? ssType.ordinal() : 0);
+        hashCode = 31 * hashCode + (udtTypeName != null ? udtTypeName.hashCode() : 0);
+
+        return hashCode;
     }
 
     SSType getSSType() {

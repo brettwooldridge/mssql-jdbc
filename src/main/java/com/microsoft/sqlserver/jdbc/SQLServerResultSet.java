@@ -186,6 +186,10 @@ public class SQLServerResultSet implements ISQLServerResultSet {
         columns[index - 1].setColumnName(name);
     }
 
+    final Column[] getColumns() {
+        return columns;
+    }
+
     /**
      * Skips columns between the last marked column and the target column, inclusive, optionally discarding their values as they are skipped.
      */
@@ -212,8 +216,10 @@ public class SQLServerResultSet implements ISQLServerResultSet {
      * 
      * @param stmtIn
      *            the generating statement
+     * @param cekTable2 
+     * @param resultSetColumns 
      */
-    SQLServerResultSet(SQLServerStatement stmtIn) throws SQLServerException {
+    SQLServerResultSet(SQLServerStatement stmtIn, Column[] resultSetColumns, CekTable cekTable) throws SQLServerException {
         int resultSetID = nextResultSetID();
         loggingClassName = "com.microsoft.sqlserver.jdbc.SQLServerResultSet" + ":" + resultSetID;
         traceID = "SQLServerResultSet:" + resultSetID;
@@ -254,7 +260,7 @@ public class SQLServerResultSet implements ISQLServerResultSet {
             boolean onColMetaData(TDSReader tdsReader) throws SQLServerException {
                 columnMetaData = new StreamColumns(Util.shouldHonorAEForRead(stmt.stmtColumnEncriptionSetting, stmt.connection));
                 columnMetaData.setFromTDS(tdsReader);
-                cekTable = columnMetaData.getCekTable();
+                SQLServerResultSet.this.cekTable = columnMetaData.getCekTable();
                 return true;
             }
         }
@@ -362,9 +368,22 @@ public class SQLServerResultSet implements ISQLServerResultSet {
         CursorInitializer initializer = stmtIn.executedSqlDirectly ? (new ClientCursorInitializer()) : (new ServerCursorInitializer(stmtIn));
 
         TDSParser.parse(stmtIn.resultsReader(), initializer);
-        this.columns = initializer.buildColumns();
+        if (null != resultSetColumns) {
+            // TODO clone resultSetColumns
+            this.columns = resultSetColumns;
+            for (int i = 0; i < resultSetColumns.length; i++) {
+                this.columns[i].clear();
+            }
+        }
+        else {
+            this.columns = initializer.buildColumns();
+        }
         this.rowCount = initializer.getRowCount();
         this.serverCursorId = initializer.getServerCursorId();
+
+        if (null != cekTable) {
+            this.cekTable = cekTable;
+        }
 
         // If this result set does not use a server cursor, then the result set rows
         // (if any) are already present in the fetch buffer at which the statement's

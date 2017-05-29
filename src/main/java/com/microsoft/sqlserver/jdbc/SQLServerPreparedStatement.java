@@ -30,8 +30,8 @@ import java.util.Map;
 import java.util.Vector;
 import java.util.logging.Level;
 
-import com.microsoft.sqlserver.jdbc.SQLServerConnection.PreparedStatementMetadata;
 import com.microsoft.sqlserver.jdbc.SQLServerConnection.CityHash128Key;
+import com.microsoft.sqlserver.jdbc.SQLServerConnection.PreparedStatementMetadata;
 
 /**
  * SQLServerPreparedStatement provides JDBC prepared statement functionality. SQLServerPreparedStatement provides methods for the user to supply
@@ -133,6 +133,8 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      */
     private boolean encryptionMetadataIsRetrieved = false;
 
+    private boolean isCanReuseMetadata;
+
     // Internal function used in tracing
     String getClassNameInternal() {
         return "SQLServerPreparedStatement";
@@ -172,15 +174,6 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         // Create a cache key for this statement.
         cacheKey = new CityHash128Key(sql);
 
-        // Parse or fetch SQL metadata from cache.
-        ParsedSQLCacheItem parsedSql = getOrCreateCachedParsedSQL(cacheKey, sql);
-
-        // Retrieve meta data from cache item.
-        procedureName = parsedSql.procedureName;
-        bReturnValueSyntax = parsedSql.bReturnValueSyntax;
-        userSQL = parsedSql.processedSQL;
-        initParams(parsedSql.parameterCount);
-
         // Attempt to borrow the statement handle, if statement handle caching is enabled, this will be 0 if not.
         prepStmtHandle = connection.borrowStatementHandle(cacheKey);
         if (0 < prepStmtHandle) {
@@ -190,6 +183,25 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         // See if existing prepared statement parameter metadata can be re-used, this will be null if not.
         cachedPreparedStatementMetadata = connection.getPreparedStatementMetadata(cacheKey);
+
+        // Parse or fetch SQL metadata from cache.
+        ParsedSQLCacheItem parsedSql = getOrCreateCachedParsedSQL(cacheKey, sql);
+
+        // Retrieve meta data from cache item.
+        procedureName = parsedSql.procedureName;
+        bReturnValueSyntax = parsedSql.bReturnValueSyntax;
+        userSQL = parsedSql.processedSQL;
+
+        if (null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasInOutParams()) {
+            Parameter[] params = cachedPreparedStatementMetadata.getInOutParams();
+            inOutParam = new Parameter[params.length];
+            for (int i = 0; i < params.length; i++) {
+                inOutParam[i] = params[i].cloneForBatch();
+            }
+        }
+        else {
+            initParams(parsedSql.parameterCount);            
+        }
     }
 
     /**
@@ -302,21 +314,23 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      * Determines whether the statement needs to be reprepared based on a change in any of the type definitions of any of the parameters due to
      * changes in scale, length, etc., and, if so, sets the new type definition string.
      */
-    private boolean buildPreparedStrings(Parameter[] params,
-            boolean renewDefinition) throws SQLServerException {
+    private boolean buildPreparedStrings(Parameter[] params, boolean renewDefinition) throws SQLServerException {
 
         String newTypeDefinitions = (null != cachedPreparedStatementMetadata) ? cachedPreparedStatementMetadata.getPreparedTypeDefinitions(params) : null;
         if (!renewDefinition && null != newTypeDefinitions) {
             preparedTypeDefinitions = newTypeDefinitions;
             preparedSQL = cachedPreparedStatementMetadata.getPreparedSql();
+            isCanReuseMetadata = true;
             return false;
         }
 
+        getStatementLogger().info("buildPreparedStrings() cache miss " + params);
         newTypeDefinitions = buildParamTypeDefinitions(params, renewDefinition);
         if (newTypeDefinitions.equals(preparedTypeDefinitions))
             return false;
 
         preparedTypeDefinitions = newTypeDefinitions;
+        isCanReuseMetadata = false;
 
         /* Replace the parameter marker '?' with the param numbers @p1, @p2 etc */
         preparedSQL = connection.replaceParameterMarkers(userSQL, params, bReturnValueSyntax);
@@ -375,6 +389,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
             if (params[i].isOutput())
                 sb.append(" OUTPUT");
         }
+
         return sb.toString();
     }
 
@@ -528,7 +543,17 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         ensureExecuteResultsReader(command.startResponse(getIsResponseBufferingAdaptive()));
         startResults();
-        getNextResult();
+        if (isCanReuseMetadata && null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasResultSetColumns()) {
+            getNextResult(cachedPreparedStatementMetadata.getResultSetColumns(), cachedPreparedStatementMetadata.getCekTable());
+        }
+        else {
+            getNextResult();
+            getStatementLogger().info("No cached ResultSet metadata for prepared statement");
+            if (null != resultSet && null != cachedPreparedStatementMetadata) {
+                cachedPreparedStatementMetadata.setResultSetColumns(resultSet.getColumns(), resultSet.getCekTable());
+                isCanReuseMetadata = true;
+            }
+        }
 
         if (EXECUTE_QUERY == executeMethod && null == resultSet) {
             SQLServerException.makeFromDriverError(connection, this, SQLServerException.getErrString("R_noResultset"), null, true);
@@ -734,8 +759,20 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
 
         tdsWriter.writeShort((short) 0xFFFF); // procedure name length -> use ProcIDs
         tdsWriter.writeShort(TDS.PROCID_SP_EXECUTE);
-        tdsWriter.writeByte((byte) 0);  // RPC procedure option 1
-        tdsWriter.writeByte((byte) 0);  // RPC procedure option 2 */
+        
+        if (isCanReuseMetadata) {
+            getStatementLogger().info("Executing with fNoMetaData and fReuseMetaData");
+            // see Tabular Data Stream Protocol 2.2.6.6 RPC Request
+            tdsWriter.writeByte((byte) 0b00000110); // fNoMetaData and fReuseMetaData
+            tdsWriter.writeByte((byte) 0);          // RPC procedure option 2
+        }
+        else {
+            getStatementLogger().info("Executing isCanReuseMetadata=false");
+            tdsWriter.writeByte((byte) 0);  // RPC procedure option 1
+            tdsWriter.writeByte((byte) 0);  // RPC procedure option 2
+        }
+
+        isCanReuseMetadata = true;
 
         // <handle> IN
         assert hasPreparedStatementHandle();

@@ -27,8 +27,8 @@ public class SQLServerResultSet42 extends SQLServerResultSet implements ISQLServ
      * @throws SQLServerException
      *             when an error occurs
      */
-    public SQLServerResultSet42(SQLServerStatement stmtIn) throws SQLServerException {
-        super(stmtIn);
+    public SQLServerResultSet42(SQLServerStatement stmtIn, Column[] resultSetColumns, CekTable cekTable) throws SQLServerException {
+        super(stmtIn, resultSetColumns, cekTable);
     }
 
     public void updateObject(int index,

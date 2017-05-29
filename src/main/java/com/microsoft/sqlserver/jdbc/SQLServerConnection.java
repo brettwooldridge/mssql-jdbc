@@ -218,9 +218,12 @@ public class SQLServerConnection implements ISQLServerConnection {
     final class PreparedStatementMetadata {
         private final CityHash128Key hashKey;
         private volatile SQLServerParameterMetaData parameterMetadata;
+        private volatile Parameter[] inOutParams;
         private volatile int preparedTypeDefinitionHash;
         private volatile String preparedTypeDefinitions;
         private volatile String preparedSQL;
+        private volatile Column[] columns;
+        private volatile CekTable cekTable;
 
         PreparedStatementMetadata(CityHash128Key hashKey) {
             this.hashKey = hashKey;
@@ -241,12 +244,21 @@ public class SQLServerConnection implements ISQLServerConnection {
             this.parameterMetadata = parameterMetadata;
         }
 
+        boolean hasInOutParams() {
+            return null != inOutParams;
+        }
+
+        Parameter[] getInOutParams() {
+            return inOutParams;
+        }
+
         String getPreparedTypeDefinitions(Parameter[] params) {
             return (Arrays.hashCode(params) == preparedTypeDefinitionHash) ? preparedTypeDefinitions : null;
         }
 
         void setPreparedTypeDefinitions(Parameter[] params, String preparedTypeDefinitions) {
-            if (null == this.preparedTypeDefinitions) {
+            if (null == inOutParams || Arrays.hashCode(params) != preparedTypeDefinitionHash) {
+                this.inOutParams = params;
                 this.preparedTypeDefinitionHash = Arrays.hashCode(params);
                 this.preparedTypeDefinitions = preparedTypeDefinitions;
             }
@@ -264,6 +276,22 @@ public class SQLServerConnection implements ISQLServerConnection {
 
         void releaseStatementHandle() {
             returnStatementHandle(hashKey);
+        }
+
+        boolean hasResultSetColumns() {
+            return null != columns;
+        }
+
+        Column[] getResultSetColumns() {
+            return columns;
+        }
+
+        CekTable getCekTable() {
+            return cekTable;
+        }
+        void setResultSetColumns(Column[] columns, CekTable cekTable) {
+            this.columns = columns;
+            this.cekTable = cekTable;
         }
     }
 

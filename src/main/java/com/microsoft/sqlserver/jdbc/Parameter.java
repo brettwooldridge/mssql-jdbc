@@ -64,6 +64,8 @@ final class Parameter {
 
     private boolean forceEncryption = false;
 
+    private int hashCode;
+
     Parameter(boolean honorAE) {
         shouldHonorAEForParameter = honorAE;
     }
@@ -73,11 +75,15 @@ final class Parameter {
         if (this == obj) {
             return true;
         }
-        if (!(obj instanceof Parameter)) {
+        else if (!(obj instanceof Parameter)) {
             return false;
         }
+
         Parameter other = (Parameter) obj;
-        
+        if (typeDefinition != null && !typeDefinition.equals(other.typeDefinition)) {
+            return false;
+        }
+
         return deepEquals(this.typeInfo, other.typeInfo)
             && deepEquals(this.jdbcTypeSetByUser, other.jdbcTypeSetByUser)
             && deepEquals(this.cryptoMeta, other.cryptoMeta);
@@ -85,11 +91,14 @@ final class Parameter {
 
     @Override
     public int hashCode() {
-        int hc = valueLength;
-        hc = 31 * hc + (typeInfo != null ? typeInfo.hashCode() : 0);
-        hc = 31 * hc + (cryptoMeta != null && cryptoMeta.baseTypeInfo != null ? cryptoMeta.baseTypeInfo.hashCode() : 0);
-        hc = 31 * hc + (jdbcTypeSetByUser != null ? jdbcTypeSetByUser.asJavaSqlType() : 0);
-        return hc;
+        if (hashCode != 0)
+            return hashCode;
+
+        hashCode = (typeDefinition != null) ? typeDefinition.hashCode() : 17;
+        hashCode = 31 * hashCode + (typeInfo != null ? typeInfo.hashCode() : 0);
+        hashCode = 31 * hashCode + (cryptoMeta != null && cryptoMeta.baseTypeInfo != null ? cryptoMeta.baseTypeInfo.hashCode() : 0);
+        hashCode = 31 * hashCode + (jdbcTypeSetByUser != null ? jdbcTypeSetByUser.asJavaSqlType() : 0);
+        return hashCode;
     }
 
     // Flag set to true if this is a registered OUTPUT parameter.
