@@ -142,11 +142,12 @@ public class SQLServerConnection implements ISQLServerConnection {
     private SqlFedAuthToken fedAuthToken = null;
 
     static class CityHash128Key {
-        private long[] segments;
-        private int hashCode;
+        private final long[] segments;
+        private final int hashCode;
 
         CityHash128Key(String s) {
             segments = CityHash.cityHash128(s.getBytes(), 0, s.length());
+            hashCode = java.util.Arrays.hashCode(segments);
         }
 
         public boolean equals(Object obj) {
@@ -157,10 +158,18 @@ public class SQLServerConnection implements ISQLServerConnection {
         }
 
         public int hashCode() {
-            if (0 == hashCode) {
-                hashCode = java.util.Arrays.hashCode(segments); 
-            }
             return hashCode;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("CityHashKey128[ ");
+            for (long seg : segments) {
+                sb.append(seg).append(' ');
+            }
+            sb.append(']');
+            return sb.toString();
         }
     }
 
@@ -227,6 +236,7 @@ public class SQLServerConnection implements ISQLServerConnection {
 
         PreparedStatementMetadata(CityHash128Key hashKey) {
             this.hashKey = hashKey;
+            this.preparedTypeDefinitionHash = Arrays.hashCode(inOutParams);
 
             // keep the statement handle alive for the life of the prepared statement metadata
             borrowStatementHandle(hashKey);
@@ -244,10 +254,6 @@ public class SQLServerConnection implements ISQLServerConnection {
             this.parameterMetadata = parameterMetadata;
         }
 
-        boolean hasInOutParams() {
-            return null != inOutParams;
-        }
-
         Parameter[] getInOutParams() {
             return inOutParams;
         }
@@ -256,8 +262,12 @@ public class SQLServerConnection implements ISQLServerConnection {
             return (Arrays.hashCode(params) == preparedTypeDefinitionHash) ? preparedTypeDefinitions : null;
         }
 
+        boolean hasPreparedTypeDefinitions() {
+            return null != inOutParams;
+        }
+
         void setPreparedTypeDefinitions(Parameter[] params, String preparedTypeDefinitions) {
-            if (null == inOutParams || Arrays.hashCode(params) != preparedTypeDefinitionHash) {
+            if (null == inOutParams || Arrays.hashCode(params) != preparedTypeDefinitionHash || !preparedTypeDefinitions.equals(this.preparedTypeDefinitions)) {
                 this.inOutParams = params;
                 this.preparedTypeDefinitionHash = Arrays.hashCode(params);
                 this.preparedTypeDefinitions = preparedTypeDefinitions;

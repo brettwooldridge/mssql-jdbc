@@ -70,6 +70,10 @@ final class Parameter {
         shouldHonorAEForParameter = honorAE;
     }
 
+    String getTypeDefinition() {
+        return typeDefinition;
+    }
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) {
@@ -99,6 +103,13 @@ final class Parameter {
         hashCode = 31 * hashCode + (cryptoMeta != null && cryptoMeta.baseTypeInfo != null ? cryptoMeta.baseTypeInfo.hashCode() : 0);
         hashCode = 31 * hashCode + (jdbcTypeSetByUser != null ? jdbcTypeSetByUser.asJavaSqlType() : 0);
         return hashCode;
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("TypeInfo: " + typeInfo);
+        return sb.toString();
     }
 
     // Flag set to true if this is a registered OUTPUT parameter.

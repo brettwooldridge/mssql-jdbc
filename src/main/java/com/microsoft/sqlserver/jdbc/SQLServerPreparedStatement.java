@@ -190,7 +190,7 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
         bReturnValueSyntax = parsedSql.bReturnValueSyntax;
         userSQL = parsedSql.processedSQL;
 
-        if (null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasInOutParams()) {
+        if (null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasPreparedTypeDefinitions()) {
             Parameter[] params = cachedPreparedStatementMetadata.getInOutParams();
             inOutParam = new Parameter[params.length];
             for (int i = 0; i < params.length; i++) {
@@ -314,36 +314,45 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      */
     private boolean buildPreparedStrings(Parameter[] params, boolean renewDefinition) throws SQLServerException {
 
-        String newTypeDefinitions = (null != cachedPreparedStatementMetadata) ? cachedPreparedStatementMetadata.getPreparedTypeDefinitions(params) : null;
-        if (!renewDefinition && null != newTypeDefinitions) {
+        String newTypeDefinitions = null;
+        if (!renewDefinition) {
+            if (null != cachedPreparedStatementMetadata && cachedPreparedStatementMetadata.hasPreparedTypeDefinitions()) {
+                newTypeDefinitions = cachedPreparedStatementMetadata.getPreparedTypeDefinitions(params);
+    
+                if (null != newTypeDefinitions) {
+                    preparedTypeDefinitions = newTypeDefinitions;
+                    preparedSQL = cachedPreparedStatementMetadata.getPreparedSql();
+                    return false;
+                }
+            }
+        }
+
+        try {
+            newTypeDefinitions = buildParamTypeDefinitions(params, renewDefinition);
+            if (newTypeDefinitions.equals(preparedTypeDefinitions))
+                return false;
+    
+            getStatementLogger().info("buildPreparedStrings() cache miss (renewDefinition=" + renewDefinition + ")");
+    
             preparedTypeDefinitions = newTypeDefinitions;
-            preparedSQL = cachedPreparedStatementMetadata.getPreparedSql();
-            return false;
+    
+            /* Replace the parameter marker '?' with the param numbers @p1, @p2 etc */
+            preparedSQL = connection.replaceParameterMarkers(userSQL, params, bReturnValueSyntax);
+            if (bRequestedGeneratedKeys)
+                preparedSQL = preparedSQL + identityQuery;
+
+            return true;
         }
-
-        getStatementLogger().info("buildPreparedStrings() cache miss " + params);
-        newTypeDefinitions = buildParamTypeDefinitions(params, renewDefinition);
-        if (newTypeDefinitions.equals(preparedTypeDefinitions))
-            return false;
-
-        preparedTypeDefinitions = newTypeDefinitions;
-
-        /* Replace the parameter marker '?' with the param numbers @p1, @p2 etc */
-        preparedSQL = connection.replaceParameterMarkers(userSQL, params, bReturnValueSyntax);
-        if (bRequestedGeneratedKeys)
-            preparedSQL = preparedSQL + identityQuery;
-
-        if (null == cachedPreparedStatementMetadata)
-            cachedPreparedStatementMetadata = connection.registerPreparedStatementMetadata(cacheKey);
-        else
-            cachedPreparedStatementMetadata.setResultSetColumns(null, null);
-
-        if (null != cachedPreparedStatementMetadata) {
-            cachedPreparedStatementMetadata.setPreparedTypeDefinitions(params, newTypeDefinitions);
-            cachedPreparedStatementMetadata.setPreparedSql(preparedSQL);
+        finally {
+            if (null == cachedPreparedStatementMetadata)
+                cachedPreparedStatementMetadata = connection.registerPreparedStatementMetadata(cacheKey);
+    
+            if (null != cachedPreparedStatementMetadata) {
+                cachedPreparedStatementMetadata.setPreparedTypeDefinitions(params, newTypeDefinitions);
+                cachedPreparedStatementMetadata.setPreparedSql(preparedSQL);
+                cachedPreparedStatementMetadata.setResultSetColumns(null, null);
+            }
         }
-
-        return true;
     }
 
     /**
@@ -357,12 +366,15 @@ public class SQLServerPreparedStatement extends SQLServerStatement implements IS
      *             when an error occurs.
      * @return the required data type defintions.
      */
-    private String buildParamTypeDefinitions(Parameter[] params,
-            boolean renewDefinition) throws SQLServerException {
+    private String buildParamTypeDefinitions(Parameter[] params, boolean renewDefinition) throws SQLServerException {
+        parameterNames = new ArrayList<String>();
+
+        if (params.length == 0)
+            return "";
+
         StringBuilder sb = new StringBuilder();
         int nCols = params.length;
         char cParamName[] = new char[10];
-        parameterNames = new ArrayList<String>();
 
         for (int i = 0; i < nCols; i++) {
             if (i > 0)

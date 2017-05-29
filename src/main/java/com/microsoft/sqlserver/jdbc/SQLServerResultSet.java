@@ -217,7 +217,7 @@ public class SQLServerResultSet implements ISQLServerResultSet {
      * @param cekTable2 
      * @param resultSetColumns 
      */
-    SQLServerResultSet(SQLServerStatement stmtIn, PreparedStatementMetadata cachedMetadata) throws SQLServerException {
+    SQLServerResultSet(SQLServerStatement stmtIn, final PreparedStatementMetadata cachedMetadata) throws SQLServerException {
         int resultSetID = nextResultSetID();
         loggingClassName = "com.microsoft.sqlserver.jdbc.SQLServerResultSet" + ":" + resultSetID;
         traceID = "SQLServerResultSet:" + resultSetID;

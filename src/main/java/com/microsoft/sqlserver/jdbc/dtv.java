@@ -2418,6 +2418,14 @@ final class TypeInfo {
         return hashCode;
     }
 
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ssType:").append(ssType.toString()).append(',');
+        sb.append("displaySize:").append(displaySize);
+        return sb.toString();
+    }
+
     SSType getSSType() {
         return ssType;
     }
